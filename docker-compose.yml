@@ -9,7 +9,7 @@ x-logging: &default-logging
       max-file: "3"
 
 services:
-  # 1. Reverse Proxy (Веб-сервер Nginx — единственный щит системы)
+  # 1. Reverse Proxy (Nginx) — имеет доступ И во внешнюю сеть, И к n8n/Grafana
   nginx:
     image: nginx:1.25-alpine
     container_name: pipeline_nginx
@@ -30,9 +30,10 @@ services:
       - n8n
       - grafana
     networks:
-      - app_network
+      - public_net  # Смотрит наружу (принимает трафик от Ngrok/Cloudflare)
+      - private_net # Смотрит внутрь (передает трафик к n8n и Grafana)
 
-  # 2. СУБД PostgreSQL (База данных полностью скрыта от интернета)
+  # 2. СУБД PostgreSQL — ПОЛНОСТЬЮ изолирована. Доступна ТОЛЬКО для n8n и Grafana
   postgres:
     image: postgres:15-alpine
     container_name: pipeline_postgres
@@ -57,9 +58,9 @@ services:
         reservations:
           memory: 128M
     networks:
-      - app_network
+      - private_net # Полноценная изоляция от внешнего мира
 
-  # 3. Оркестратор автоматизации n8n (Логика и ИИ-запросы)
+  # 3. Оркестратор n8n — находится в private_net, чтобы общаться с Postgres, Grafana и Nginx
   n8n:
     image: docker.n8n.io/n8nio/n8n:latest
     container_name: pipeline_n8n
@@ -74,7 +75,6 @@ services:
       - N8N_PROTOCOL=https
       - N8N_HOST=${DOMAIN_NAME}
       - WEBHOOK_URL=https://${DOMAIN_NAME}/
-      # === ИСПРАВЛЕНИЕ ПРАВ СИСТЕМНЫХ ФАЙЛОВ N8N ===
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
     volumes:
       - n8n_data:/home/node/.n8n
@@ -91,9 +91,9 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      - app_network
+      - private_net # Находится во внутренней безопасной сети
 
-  # 4. Платформа визуализации Grafana (Чистая и стабильная)
+  # 4. Платформа визуализации Grafana — находится в private_net
   grafana:
     image: grafana/grafana:latest
     container_name: pipeline_grafana
@@ -112,13 +112,16 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      - app_network
+      - private_net # Находится во внутренней безопасной сети
 
 volumes:
   pg_data:
   n8n_data:
   grafana_data:
 
+# Определение двух изолированных сетей
 networks:
-  app_network:
+  public_net:  # Внешний периметр (только для входящего веб-трафика)
+    driver: bridge
+  private_net: # Внутренний периметр (для безопасного обмена данными между сервисами)
     driver: bridge
