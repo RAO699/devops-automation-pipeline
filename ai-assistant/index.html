@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Премиальная дизайн-студия</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background-color: #121212; color: #fff; margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; height: 100vh; text-align: center; }
+        .container { max-width: 600px; padding: 20px; }
+        h1 { color: #4CAF50; font-size: 3rem; margin-bottom: 10px; }
+        p { color: #888; font-size: 1.2rem; }
+
+        /* Кнопка вызова чата */
+        .chat-widget-button { position: fixed; bottom: 30px; right: 30px; width: 60px; height: 60px; background-color: #4CAF50; border-radius: 50%; display: flex; justify-content: center; align-items: center; box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4); cursor: pointer; transition: transform 0.2s, background-color 0.2s; z-index: 1000; }
+        .chat-widget-button:hover { transform: scale(1.05); background-color: #45a049; }
+        .chat-widget-button svg { width: 28px; height: 28px; fill: #fff; }
+
+        /* Окно чата */
+        .chat-window { position: fixed; bottom: 100px; right: 30px; width: 350px; height: 450px; background-color: #1e1e1e; border: 1px solid #333; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); display: none; flex-direction: column; z-index: 1000; text-align: left; overflow: hidden; }
+        .chat-window.active { display: flex; }
+        .chat-header { background-color: #2d2d2d; padding: 15px; font-weight: bold; border-bottom: 1px solid #333; color: #4CAF50; }
+        .chat-messages { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+        .message { padding: 8px 12px; border-radius: 8px; max-width: 80%; font-size: 0.95rem; line-height: 1.4; }
+        .message.user { background-color: #4CAF50; color: #fff; align-self: flex-end; }
+        .message.bot { background-color: #2d2d2d; color: #eee; align-self: flex-start; border: 1px solid #333; }
+        .chat-input-area { display: flex; padding: 10px; background-color: #2d2d2d; border-top: 1px solid #333; }
+        .chat-input { flex: 1; background-color: #121212; border: 1px solid #444; color: #fff; padding: 8px 12px; border-radius: 6px; outline: none; }
+        .chat-input:focus { border-color: #4CAF50; }
+        .chat-send-btn { background-color: #4CAF50; color: white; border: none; padding: 8px 15px; margin-left: 8px; border-radius: 6px; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Студия Интерьера</h1>
+        <p>Мы создаем пространства вашей мечты. Наш ИИ-консультант в правом углу готов ответить на любые вопросы и рассчитать стоимость проекта прямо сейчас!</p>
+    </div>
+
+    <!-- Окно чата -->
+    <div class="chat-window" id="chatWindow">
+        <div class="chat-header">ИИ Консультант</div>
+        <div class="chat-messages" id="chatMessages">
+            <div class="message bot">Здравствуйте! Чем я могу помочь вам сегодня?</div>
+        </div>
+        <div class="chat-input-area">
+            <input type="text" class="chat-input" id="chatInput" placeholder="Введите сообщение..." autocomplete="off">
+            <button class="chat-send-btn" id="sendBtn">Отправить</button>
+        </div>
+    </div>
+
+    <!-- Кнопка чата -->
+    <div class="chat-widget-button" id="chatButton">
+        <svg viewBox="0 0 24 24">
+            <path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"/>
+        </svg>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const button = document.getElementById('chatButton');
+            const chatWindow = document.getElementById('chatWindow');
+            const input = document.getElementById('chatInput');
+            const sendBtn = document.getElementById('sendBtn');
+            const messagesContainer = document.getElementById('chatMessages');
+
+            const sessionId = 'session_' + Math.random().toString(36).substr(2, 9);
+            const webhookUrl = 'https://10.10.10.54/webhook/1c57232e-74f2-406a-b283-f0cf209383a9/chat';
+
+            button.addEventListener('click', () => {
+                chatWindow.classList.toggle('active');
+                if (chatWindow.classList.contains('active')) input.focus();
+            });
+
+            function appendMessage(text, sender) {
+                const msg = document.createElement('div');
+                msg.classList.add('message', sender);
+                msg.textContent = text;
+                messagesContainer.appendChild(msg);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+
+            async function sendMessage() {
+                const text = input.value.trim();
+                if (!text) return;
+
+                appendMessage(text, 'user');
+                input.value = '';
+
+                try {
+                    const response = await fetch(webhookUrl, {
+                        method: 'POST',
+                        mode: 'no-cors',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            chatInput: text,
+                            sessionId: sessionId
+                        })
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        // Берем чистый ответ от ИИ-агента n8n
+                        let reply = data.output || data.response || JSON.stringify(data);
+                        appendMessage(reply, 'bot');
+                    } else {
+                        appendMessage("Ошибка сервера, статус: " + response.status, 'bot');
+                    }
+                } catch (err) {
+                    appendMessage("Ошибка сети. Нажмите на соседней вкладке 'Перейти небезопасно'.", 'bot');
+                }
+            }
+
+            sendBtn.addEventListener('click', sendMessage);
+            input.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') sendMessage();
+            });
+        });
+    </script>
+</body>
+</html>

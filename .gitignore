@@ -1,0 +1,11 @@
+.env
+*.env
+*.crt
+*.key
+certs/
+
+
+*.gz
+*.sql
+*.zip
+*.tar.gz

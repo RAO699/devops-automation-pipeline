@@ -1,0 +1,124 @@
+version: '3.8'
+
+# Глобальный шаблон ротации логов (защита диска от переполнения)
+x-logging: &default-logging
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  # 1. Reverse Proxy (Веб-сервер Nginx — единственный щит системы)
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: pipeline_nginx
+    ports:
+      - "443:443"   # Внешний порт для безопасного доступа к n8n
+      - "3000:3000"  # Внешний порт для безопасного доступа к Grafana
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    restart: always
+    <<: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 128M
+    depends_on:
+      - n8n
+      - grafana
+    networks:
+      - app_network
+
+  # 2. СУБД PostgreSQL (База данных полностью скрыта от интернета)
+  postgres:
+    image: postgres:15-alpine
+    container_name: pipeline_postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+    <<: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+        reservations:
+          memory: 128M
+    networks:
+      - app_network
+
+  # 3. Оркестратор автоматизации n8n (Логика и ИИ-запросы)
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: pipeline_n8n
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
+      - DB_POSTGRESDB_USER=${POSTGRES_USER}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+      - N8N_ENCRYPTION_KEY=${N8N_CRYPTO_KEY}
+      - N8N_PROTOCOL=https
+      - N8N_HOST=${DOMAIN_NAME}
+      - WEBHOOK_URL=https://${DOMAIN_NAME}/
+      # === ИСПРАВЛЕНИЕ ПРАВ СИСТЕМНЫХ ФАЙЛОВ N8N ===
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+    volumes:
+      - n8n_data:/home/node/.n8n
+    restart: always
+    <<: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: '1.50'
+          memory: 1G
+        reservations:
+          memory: 256M
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - app_network
+
+  # 4. Платформа визуализации Grafana (Чистая и стабильная)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: pipeline_grafana
+    volumes:
+      - grafana_data:/var/lib/grafana
+    restart: always
+    <<: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+        reservations:
+          memory: 128M
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - app_network
+
+volumes:
+  pg_data:
+  n8n_data:
+  grafana_data:
+
+networks:
+  app_network:
+    driver: bridge
