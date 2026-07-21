@@ -1,6 +1,5 @@
 version: '3.8'
 
-# Глобальный шаблон ротации логов (защита диска от переполнения)
 x-logging: &default-logging
   logging:
     driver: "json-file"
@@ -9,16 +8,18 @@ x-logging: &default-logging
       max-file: "3"
 
 services:
-  # 1. Reverse Proxy (Nginx) — имеет доступ И во внешнюю сеть, И к n8n/Grafana
+  # 1. Reverse Proxy (Nginx) — Слушает порты 443 (Сайт) и 8443 (n8n)
   nginx:
     image: nginx:1.25-alpine
     container_name: pipeline_nginx
     ports:
-      - "443:443"   # Внешний порт для безопасного доступа к n8n
-      - "3000:3000"  # Внешний порт для безопасного доступа к Grafana
+      - "443:443"     # Главная страница (Чат-интерфейс)
+      - "8443:8443"   # Вход в панель n8n
+      - "3000:3000"   # Вход в Grafana
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./certs:/etc/nginx/certs:ro
+      - ./ai-assistant:/usr/share/nginx/html/ai-assistant:ro
     restart: always
     <<: *default-logging
     deploy:
@@ -30,10 +31,10 @@ services:
       - n8n
       - grafana
     networks:
-      - public_net  # Смотрит наружу (принимает трафик от Ngrok/Cloudflare)
-      - private_net # Смотрит внутрь (передает трафик к n8n и Grafana)
+      - public_net
+      - private_net
 
-  # 2. СУБД PostgreSQL — ПОЛНОСТЬЮ изолирована. Доступна ТОЛЬКО для n8n и Grafana
+  # 2. СУБД PostgreSQL
   postgres:
     image: postgres:15-alpine
     container_name: pipeline_postgres
@@ -58,15 +59,15 @@ services:
         reservations:
           memory: 128M
     networks:
-      - private_net # Полноценная изоляция от внешнего мира
+      - private_net
 
-  # 3. Оркестратор n8n — находится в private_net, чтобы общаться с Postgres, Grafana и Nginx
+  # 3. Оркестратор автоматизации n8n (Возвращен к базовому роутингу корня)
   n8n:
     image: docker.n8n.io/n8nio/n8n:latest
     container_name: pipeline_n8n
     environment:
       - DB_TYPE=postgresdb
-      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_HOST=pipeline_postgres
       - DB_POSTGRESDB_PORT=5432
       - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
       - DB_POSTGRESDB_USER=${POSTGRES_USER}
@@ -74,7 +75,7 @@ services:
       - N8N_ENCRYPTION_KEY=${N8N_CRYPTO_KEY}
       - N8N_PROTOCOL=https
       - N8N_HOST=${DOMAIN_NAME}
-      - WEBHOOK_URL=https://${DOMAIN_NAME}/
+      - WEBHOOK_URL=https://${DOMAIN_NAME}:8443/
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
     volumes:
       - n8n_data:/home/node/.n8n
@@ -91,9 +92,9 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      - private_net # Находится во внутренней безопасной сети
+      - private_net
 
-  # 4. Платформа визуализации Grafana — находится в private_net
+  # 4. Платформа визуализации Grafana
   grafana:
     image: grafana/grafana:latest
     container_name: pipeline_grafana
@@ -104,24 +105,23 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.50'
-          memory: 512M
+          cpus: '0.25'
+          memory: 256M
         reservations:
-          memory: 128M
+          memory: 64M
     depends_on:
       postgres:
         condition: service_healthy
     networks:
-      - private_net # Находится во внутренней безопасной сети
+      - private_net
 
 volumes:
   pg_data:
   n8n_data:
   grafana_data:
 
-# Определение двух изолированных сетей
 networks:
-  public_net:  # Внешний периметр (только для входящего веб-трафика)
+  public_net:
     driver: bridge
-  private_net: # Внутренний периметр (для безопасного обмена данными между сервисами)
+  private_net:
     driver: bridge
